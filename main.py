@@ -3,7 +3,8 @@ import os
 import logging
 from graph_builder import build_graphs
 import asyncio
-from documentation_workflow import workflow, initialize_state
+# Import the new reverse documentation workflow instead
+from reverse_documentation_workflow import compiled_workflow, initialize_reverse_workflow
 import json
 import glob
 
@@ -53,6 +54,8 @@ if __name__ == "__main__":
     outer_cfg = None
     inner_cfgs = None
 
+    outer_cfg, inner_cfgs = build_graphs(jcl_jsons, cobol_jsons)
+    exit()
     # Try to load graphs from cache
     if os.path.exists(GRAPH_CACHE_FILE):
         logging.info(f"Loading graphs from cache: {GRAPH_CACHE_FILE}")
@@ -77,15 +80,16 @@ if __name__ == "__main__":
             logging.info(f"Graphs saved to cache: {GRAPH_CACHE_FILE}")
         except Exception as e:
             logging.error(f"Could not save graphs to cache: {e}")
-    # Run LangGraph-based documentation workflow
+    # Run LangGraph-based reverse documentation workflow
     if outer_cfg and inner_cfgs:
-        logging.info("Starting LangGraph documentation workflow...")
+        logging.info("Starting reverse documentation workflow...")
         output_directory = "generated_documentation"
-        initial_state = initialize_state(outer_cfg, inner_cfgs, output_directory)
-        app = workflow.compile()
+        # Initialize state using the reverse workflow function
+        initial_state = initialize_reverse_workflow(outer_cfg, inner_cfgs, output_directory)
+        # The workflow is already compiled in the imported module
         # Run the workflow
-        result = asyncio.run(app.ainvoke(initial_state, config = {"recursion_limit": 5000}))
-        logging.info("LangGraph documentation workflow finished.")
+        result = asyncio.run(compiled_workflow.ainvoke(initial_state, config = {"recursion_limit": 5000}))
+        logging.info("Reverse documentation workflow finished successfully.")
     else:
         logging.error("Graphs could not be built or loaded. Skipping documentation workflow.")
 
