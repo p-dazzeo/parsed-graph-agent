@@ -55,26 +55,11 @@ def build_graphs(jcl_json_list, cobol_json_list):
         program_code_with_comments = ""
         program_code_without_comments = ""
         all_called_programs = set()
-        
-        # Sort paragraphs by their order in the source code if 'paragraph_order' is available
-        sorted_paragraph_items = sorted(
-            paragraphs.items(),
-            key=lambda item: item[1].get('procedure_division', {}).get('paragraph', {}).get('paragraph_order', float('inf'))
-        )
-        
-        for p_name, p_details in sorted_paragraph_items:
-            proc_div = p_details.get('procedure_division', {})
-            paragraph_specific_data = proc_div.get('paragraph', {})
-            
-            actual_para_code_with_comments = paragraph_specific_data.get('code_with_comments', '')
-            actual_para_code_without_comments = paragraph_specific_data.get('code_without_comments', '')
-            
-            program_code_with_comments += f"\n\n* --- PARAGRAPH: {p_name} ---\n"
-            program_code_with_comments += actual_para_code_with_comments
-            program_code_without_comments += f"\n{actual_para_code_without_comments}"
-            
-            # Collect called programs from all paragraphs correctly
-            for called_prog in paragraph_specific_data.get('called_programs', []):
+        for p_name, p_details in paragraphs.items():
+            program_code_with_comments += f"\n* {p_name}:\n{p_details.get('code_with_comments', '')}"
+            program_code_without_comments += f"\n{p_details.get('code_without_comments', '')}"
+            # Collect called programs from all paragraphs
+            for called_prog in p_details.get('called_programs', []):
                 all_called_programs.add(called_prog)
 
         outer_cfg._graph.nodes[prog_id]['code_with_comments'] = program_code_with_comments.strip()
@@ -90,23 +75,20 @@ def build_graphs(jcl_json_list, cobol_json_list):
             inner.add_node(pid,
                            name=p,
                            code_with_comments=v['procedure_division']['paragraph'].get('code_with_comments'),
-                           code_without_comments=v['procedure_division']['paragraph'].get('code_without_comments'),
+                           code_without_comments=v.get('code_without_comments'),
                            type='paragraph')
             
         
         # add edges for PERFORM and GOTO targets
         for p,v in paragraphs.items():
             src = f"{prog_id}:{p}"
-            para_data = v.get('procedure_division', {}).get('paragraph', {})
-            
-            for tgt in para_data.get('perform_targets', []):
+            for tgt in v.get('perform_targets', []):
                 tgt_id = f"{prog_id}:{tgt}"
                 if tgt_id in inner.nodes(): # Ensure target exists in this program's paragraphs
                     inner.add_edge(src, tgt_id, type='PERFORM')
                 else:
                     logger.warning(f"PERFORM target {tgt_id} not found in program {prog_id}")
-                    
-            for tgt in para_data.get('goto_targets', []):
+            for tgt in v.get('goto_targets', []):
                 tgt_id = f"{prog_id}:{tgt}"
                 if tgt_id in inner.nodes(): # Ensure target exists in this program's paragraphs
                     inner.add_edge(src, tgt_id, type='GOTO')

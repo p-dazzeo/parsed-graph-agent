@@ -52,3 +52,7 @@ class Graph:
     def in_degree(self, node):
         """Return the in-degree of node."""
         return self._graph.in_degree(node)
+        
+    def has_edge(self, source, target):
+        """Return True if the graph contains the edge (source, target)."""
+        return self._graph.has_edge(source, target)
