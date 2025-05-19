@@ -18,3 +18,5 @@ model_logs
 *.pkl
 
 generated_*
+
+test_data
