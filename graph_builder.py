@@ -12,27 +12,44 @@ logger = logging.getLogger(__name__)
 
 def remove_edges(graph, edges):
     """
-    Remove edges from the graph.
+    Recursively remove edges that create cycles in the graph.
     
     Args:
         graph (Graph): The graph from which to remove edges.
         edges (list): A list of edges to remove.
+        
+    Returns:
+        list: A list of removed edges.
     """
-    # TODO: implement recursion
     removed_edges = []
-    for u, v in list(edges):
-            if graph.has_path(v, u):
-                # ONLY remove the edge that creates the cycle
-                edge_to_remove = (u, v) if graph.in_degree(u) > graph.in_degree(v) else (v, u)
-                removed_edges.append(edge_to_remove)
-                graph.remove_edge(*edge_to_remove)
-                logger.debug("Removed back-edge %s to break cycle in program %s",
-                            edge_to_remove)
-    if removed_edges:
-        logger.debug("Removed %d edges to break cycles in program %s", 
-                    len(removed_edges))
     
-            
+    def find_cycle():
+        """Find a cycle in the graph and return the last edge that creates it."""
+        # Use NetworkX to find cycles in the graph
+        try:
+            cycle = nx.find_cycle(graph._graph, orientation='original')
+            if cycle:
+                # Get the last edge from the cycle
+                u, v, _ = cycle[-1]
+                return u, v
+        except nx.NetworkXNoCycle:
+            return None
+    
+    # Recursively identify and remove cycle-creating edges
+    cycle_edge = find_cycle()
+    while cycle_edge:
+        u, v = cycle_edge
+        # Remove the edge creating the cycle
+        logger.debug("Removing edge %s -> %s to break cycle", u, v)
+        graph.remove_edge(u, v)
+        removed_edges.append((u, v))
+        
+        # Look for the next cycle
+        cycle_edge = find_cycle()
+    
+    if removed_edges:
+        logger.debug("Removed %d edges to break cycles", len(removed_edges))
+    
     return removed_edges
 
 def build_graphs(jcl_json_list, cobol_json_list):
@@ -97,7 +114,6 @@ def build_graphs(jcl_json_list, cobol_json_list):
             goto_targets = v['procedure_division']['paragraph'].get('goto_targets', [])
             src = f"{prog_id}:{p}"
             for tgt in perform_targets:
-                logger.debug("Processing PERFORM target %s for paragraph %s", tgt, p)
                 if tgt['target_name'] == 'INLINE': continue
                 tgt_id = f"{prog_id}:{tgt['target_name']}"
                 logger.debug("Adding PERFORM edge from %s to %s", src, tgt_id)
@@ -122,9 +138,9 @@ def build_graphs(jcl_json_list, cobol_json_list):
         else:
              logger.warning(f"ENTRY paragraph not found for program {prog_id}. Skipping dead code removal.")
 
-        # break cycles: remove back-edges for i<j by name order
+        # break cycles: recursively remove edges that create cycles
         removed_edges = remove_edges(inner, list(inner.edges()))
-        # TODO: remove edges in list removed_edges from graph
+        # Edges have already been removed by the remove_edges function
         inner_cfg[prog_id] = inner
         
         # inter-program CALL edges
