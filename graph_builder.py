@@ -10,6 +10,146 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+def debug_print_graph(graph, filename=None, use_interactive=True):
+    """
+    Print a visual representation of the graph. Optionally save to a file.
+    
+    Args:
+        graph (Graph): The graph to visualize.
+        filename (str, optional): Path to save the visualization. If None, just displays.
+        use_interactive (bool): Whether to use interactive visualization (HTML) or static (PNG).
+    """
+    import os
+    
+    # Create output directory if it doesn't exist
+    output_dir = "output/images"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Update filename with output directory if provided
+    if filename:
+        filename = os.path.join(output_dir, os.path.basename(filename))
+    
+    if use_interactive:
+        try:
+            from pyvis.network import Network
+            import networkx as nx
+            import webbrowser
+            
+            # Create PyVis network
+            net = Network(height="750px", width="100%", notebook=False, directed=True)
+            
+            # From NetworkX graph to PyVis network
+            net.from_nx(graph._graph)
+            
+            # Configure physics for better visualization
+            net.toggle_physics(True)
+            net.set_options("""
+            const options = {
+                "nodes": {
+                    "font": {
+                        "size": 12,
+                        "face": "Tahoma"
+                    },
+                    "shape": "dot",
+                    "size": 15
+                },
+                "edges": {
+                    "color": {
+                        "inherit": true
+                    },
+                    "smooth": {
+                        "enabled": false
+                    },
+                    "arrows": {
+                        "to": {
+                            "enabled": true,
+                            "scaleFactor": 0.5
+                        }
+                    }
+                },
+                "physics": {
+                    "barnesHut": {
+                        "gravitationalConstant": -4000,
+                        "centralGravity": 0.3,
+                        "springLength": 120
+                    },
+                    "minVelocity": 0.75
+                }
+            }""")
+            
+            # Save and show
+            html_file = filename.replace('.png', '.html') if filename else os.path.join(output_dir, "network.html")
+            net.save_graph(html_file)
+            print(f"Interactive graph saved to {html_file}")
+            
+            # Open in browser
+            try:
+                webbrowser.open('file://' + os.path.abspath(html_file), new=2)
+            except Exception as e:
+                print(f"Couldn't open browser automatically: {e}\nPlease open {html_file} manually.")
+            
+        except ImportError:
+            print("PyVis not installed. Falling back to static visualization.")
+            print("To install: pip install pyvis")
+            _static_graph_visualization(graph, filename)
+    else:
+        _static_graph_visualization(graph, filename)
+
+
+def _static_graph_visualization(graph, filename=None):
+    """
+    Create a static graph visualization using matplotlib.
+    
+    Args:
+        graph (Graph): The graph to visualize.
+        filename (str, optional): Path to save the visualization.
+    """
+    import matplotlib.pyplot as plt
+    import networkx as nx
+    import os
+    
+    plt.figure(figsize=(12, 8))
+    pos = nx.spring_layout(graph._graph, seed=42)  # For reproducible layout
+    nx.draw(graph._graph, pos, with_labels=True, node_color='lightblue', 
+            node_size=500, arrows=True, connectionstyle='arc3,rad=0.1')
+    
+    if filename:
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        plt.savefig(filename)
+    plt.show()
+
+
+def debug_print_graph_dict(graph_dict, base_filename=None, use_interactive=True):
+    """
+    Print visual representations of a dictionary of graphs.
+    Optionally save each to a file with program ID in the filename.
+    
+    Args:
+        graph_dict (dict): Dictionary mapping program IDs to Graph objects.
+        base_filename (str, optional): Base path for saving visualizations.
+        use_interactive (bool): Whether to use interactive visualization (HTML) or static (PNG).
+    """
+    import os
+    
+    # The output directory is handled within debug_print_graph
+    # but we need to sanitize program IDs for filenames    
+    for prog_id, graph in graph_dict.items():
+        print(f"Visualizing graph for program: {prog_id}")
+        if base_filename:
+            # Handle different file extensions for interactive vs static
+            ext = "html" if use_interactive else base_filename.split('.')[-1]
+            base = base_filename.split('.')[0]
+            
+            # Sanitize program_id for use in filename (remove special chars)
+            safe_prog_id = "".join(c if c.isalnum() else "_" for c in prog_id)
+            filename = f"{base}_{safe_prog_id}.{ext}"
+            
+            debug_print_graph(graph, filename, use_interactive)
+        else:
+            debug_print_graph(graph, None, use_interactive)
+
+
 def remove_edges(graph, edges):
     """
     Recursively remove edges that create cycles in the graph.
@@ -139,8 +279,7 @@ def build_graphs(jcl_json_list, cobol_json_list):
              logger.warning(f"ENTRY paragraph not found for program {prog_id}. Skipping dead code removal.")
 
         # break cycles: recursively remove edges that create cycles
-        removed_edges = remove_edges(inner, list(inner.edges()))
-        # Edges have already been removed by the remove_edges function
+        remove_edges(inner, list(inner.edges()))
         inner_cfg[prog_id] = inner
         
         # inter-program CALL edges
@@ -189,5 +328,47 @@ def build_graphs(jcl_json_list, cobol_json_list):
                sum(inner.number_of_nodes() for inner in inner_cfg.values()), 
                sum(inner.number_of_edges() for inner in inner_cfg.values()))
     logger.info("Built inner CFGs for %d programs", len(inner_cfg))
+    
+    # If you want to visualize graphs, uncomment the following lines:
+    # # Visualize the outer graph (interactive HTML)
+    # debug_print_graph(outer_cfg, 'outer_cfg.png')
+    # 
+    # # Visualize inner graphs for each program (interactive HTML)
+    debug_print_graph_dict(inner_cfg, 'inner_cfg.png')
+    #
+    # # For static PNG visualizations instead, use:
+    # # debug_print_graph(outer_cfg, 'outer_cfg.png', use_interactive=False)
+    # # debug_print_graph_dict(inner_cfg, 'inner_cfg.png', use_interactive=False)
 
     return outer_cfg, inner_cfg
+
+
+def visualize_graphs(outer_cfg=None, inner_cfg=None, interactive=True):
+    """
+    Visualize the graphs generated by build_graphs.
+    
+    Args:
+        outer_cfg (Graph, optional): The outer graph to visualize.
+        inner_cfg (dict, optional): Dictionary mapping program IDs to inner graphs.
+        interactive (bool): Whether to use interactive HTML visualization (True) or static PNG (False).
+    """
+    import os
+    
+    # Ensure output directory exists
+    output_dir = "output/images"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    if outer_cfg is not None:
+        print("Visualizing outer graph...")
+        debug_print_graph(outer_cfg, 'outer_cfg.png', use_interactive=interactive)
+        
+    if inner_cfg is not None:
+        print("Visualizing inner graphs...")
+        debug_print_graph_dict(inner_cfg, 'inner_cfg.png', use_interactive=interactive)
+
+# Example usage:
+# from graph_builder import build_graphs, visualize_graphs
+# outer_cfg, inner_cfg = build_graphs(jcl_json_list, cobol_json_list)
+# visualize_graphs(outer_cfg, inner_cfg)  # Interactive HTML
+# visualize_graphs(outer_cfg, inner_cfg, interactive=False)  # Static PNG
+

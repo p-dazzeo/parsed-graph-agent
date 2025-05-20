@@ -20,3 +20,7 @@ model_logs
 generated_*
 
 test_data
+
+lib
+
+output

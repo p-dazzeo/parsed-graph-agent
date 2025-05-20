@@ -11,4 +11,6 @@ dependencies = [
     "langgraph>=0.4.5",
     "litellm>=1.70.0",
     "networkx>=3.4.2",
+    "mypy>=1.15.0",
+    "pyvis>=0.3.2",
 ]
