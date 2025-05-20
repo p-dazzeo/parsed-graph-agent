@@ -10,6 +10,31 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+def remove_edges(graph, edges):
+    """
+    Remove edges from the graph.
+    
+    Args:
+        graph (Graph): The graph from which to remove edges.
+        edges (list): A list of edges to remove.
+    """
+    # TODO: implement recursion
+    removed_edges = []
+    for u, v in list(edges):
+            if graph.has_path(v, u):
+                # ONLY remove the edge that creates the cycle
+                edge_to_remove = (u, v) if graph.in_degree(u) > graph.in_degree(v) else (v, u)
+                removed_edges.append(edge_to_remove)
+                graph.remove_edge(*edge_to_remove)
+                logger.debug("Removed back-edge %s to break cycle in program %s",
+                            edge_to_remove)
+    if removed_edges:
+        logger.debug("Removed %d edges to break cycles in program %s", 
+                    len(removed_edges))
+    
+            
+    return removed_edges
+
 def build_graphs(jcl_json_list, cobol_json_list):
     """
     Given lists of JCL and COBOL parser JSON objects, build:
@@ -45,25 +70,13 @@ def build_graphs(jcl_json_list, cobol_json_list):
 
         # ensure node exists in outer graph
         outer_cfg.add_node(prog_id, type='program',
-                           identification_division=prog_details.get('identification_division', {}),
-                           environment_division=prog_details.get('environment_division', {}),
-                           data_division=prog_details.get('data_division', {}),
-                           procedure_division_using=prog_details.get('procedure_division_using', []),
                            has_inner_cfg=bool(paragraphs))
         
-        # Collect code snippets from paragraphs for the outer graph node
-        program_code_with_comments = ""
-        program_code_without_comments = ""
         all_called_programs = set()
         for p_name, p_details in paragraphs.items():
-            program_code_with_comments += f"\n* {p_name}:\n{p_details.get('code_with_comments', '')}"
-            program_code_without_comments += f"\n{p_details.get('code_without_comments', '')}"
             # Collect called programs from all paragraphs
             for called_prog in p_details.get('called_programs', []):
                 all_called_programs.add(called_prog)
-
-        outer_cfg._graph.nodes[prog_id]['code_with_comments'] = program_code_with_comments.strip()
-        outer_cfg._graph.nodes[prog_id]['code_without_comments'] = program_code_without_comments.strip()
         
         # build inner CFG for this program
         inner = Graph()
@@ -77,24 +90,23 @@ def build_graphs(jcl_json_list, cobol_json_list):
                            code_with_comments=v['procedure_division']['paragraph'].get('code_with_comments'),
                            code_without_comments=v.get('code_without_comments'),
                            type='paragraph')
-            
-        
         # add edges for PERFORM and GOTO targets
         for p,v in paragraphs.items():
+            logger.debug("Processing paragraph %s", p)
+            perform_targets = v['procedure_division']['paragraph'].get('perform_targets', [])
+            goto_targets = v['procedure_division']['paragraph'].get('goto_targets', [])
             src = f"{prog_id}:{p}"
-            for tgt in v.get('perform_targets', []):
+            for tgt in perform_targets:
+                logger.debug("Processing PERFORM target %s for paragraph %s", tgt, p)
+                if tgt['target_name'] == 'INLINE': continue
+                tgt_id = f"{prog_id}:{tgt['target_name']}"
+                logger.debug("Adding PERFORM edge from %s to %s", src, tgt_id)
+                inner.add_edge(src, tgt_id, type='PERFORM')
+            for tgt in goto_targets:
                 tgt_id = f"{prog_id}:{tgt}"
-                if tgt_id in inner.nodes(): # Ensure target exists in this program's paragraphs
-                    inner.add_edge(src, tgt_id, type='PERFORM')
-                else:
-                    logger.warning(f"PERFORM target {tgt_id} not found in program {prog_id}")
-            for tgt in v.get('goto_targets', []):
-                tgt_id = f"{prog_id}:{tgt}"
-                if tgt_id in inner.nodes(): # Ensure target exists in this program's paragraphs
-                    inner.add_edge(src, tgt_id, type='GOTO')
-                else:
-                     logger.warning(f"GOTO target {tgt_id} not found in program {prog_id}")
-        
+                logger.debug("Adding GOTO edge from %s to %s", src, tgt_id)
+                inner.add_edge(src, tgt_id, type='GOTO')
+
         # remove dead code (no incoming except entry)
         entry = f"{prog_id}:ENTRY"
         dead_nodes = []
@@ -111,16 +123,8 @@ def build_graphs(jcl_json_list, cobol_json_list):
              logger.warning(f"ENTRY paragraph not found for program {prog_id}. Skipping dead code removal.")
 
         # break cycles: remove back-edges for i<j by name order
-        removed_edges = []
-        for u, v in list(inner.edges()):
-            if inner.has_path(v, u):
-                # remove edge v->u to break cycle
-                removed_edges.append((v, u))
-                inner.remove_edge(v, u)
-        if removed_edges:
-            logger.debug("Removed %d edges to break cycles in program %s", 
-                        len(removed_edges), prog_id)
-        
+        removed_edges = remove_edges(inner, list(inner.edges()))
+        # TODO: remove edges in list removed_edges from graph
         inner_cfg[prog_id] = inner
         
         # inter-program CALL edges
@@ -149,25 +153,25 @@ def build_graphs(jcl_json_list, cobol_json_list):
 
         # Add node for the JCL step and link it to the job
         outer_cfg.add_node(step_id, type='jcl_step',
-                           jobName=job_name, # Add job name attribute
-                           stepName=step.get('stepName'), # Add step name attribute
-                           stepNumber=step.get('stepNumber'), # Add step number attribute
+                           jobName=job_name,
+                           stepName=step.get('stepName'),
+                           stepNumber=step.get('stepNumber'),
                            datasets=step.get('datasets', []),
                            codeWithComments=step.get('codeWithComments', ''),
                            codeWithoutComments=step.get('codeWithoutComments', ''))
-
-        # Link JCL step to its parent JCL job (optional, can rely on attribute)
-        # outer_cfg.add_edge(job_name, step_id, type='CONTAINS_STEP') # Example edge
 
         # link JCL step->COBOL program
         prog_id = step['programId']
         # Ensure program node exists (might already exist from COBOL processing)
         if prog_id not in outer_cfg.nodes():
-             outer_cfg.add_node(prog_id, type='program') # Minimal node if not processed as COBOL
+             outer_cfg.add_node(prog_id, type='program', isPlaceholder=True)
         outer_cfg.add_edge(step_id, prog_id, type='EXECUTES')
 
     logger.info("Graph building completed. Outer graph has %d nodes and %d edges.", 
                outer_cfg.number_of_nodes(), outer_cfg.number_of_edges())
+    logger.info("Inner graph has %d nodes and %d edges.", 
+               sum(inner.number_of_nodes() for inner in inner_cfg.values()), 
+               sum(inner.number_of_edges() for inner in inner_cfg.values()))
     logger.info("Built inner CFGs for %d programs", len(inner_cfg))
 
     return outer_cfg, inner_cfg
