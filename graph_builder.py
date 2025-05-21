@@ -207,7 +207,7 @@ def build_graphs(jcl_json_list, cobol_json_list):
     # Group paragraphs by program_id
     cobol_programs = {}
     for paragraph_json in cobol_json_list:
-        prog_id = paragraph_json['program_id']
+        prog_id = paragraph_json['identification_division']['program_id']
         if prog_id not in cobol_programs:
             cobol_programs[prog_id] = {
                 'program_id': prog_id,
